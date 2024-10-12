@@ -21,6 +21,14 @@ local function normalize(x, y)
   return x / len, y / len
 end
 
+local function dot(x1, y1, x2, y2)
+  return x1 * x2 + y1 * y2
+end
+
+local function rotatePoint(x, y, angle)
+  return x * math.cos(angle) - y * math.sin(angle), y * math.cos(angle) + x * math.sin(angle)
+end
+
 local mapWidth = 20
 local mapHeight = 20
 local tileSize = 24
@@ -29,6 +37,12 @@ local map = {}
 
 ---@type Sector[]
 local sectors = {}
+
+---@type table<Sector, true>
+local visibleSectors = {}
+
+---@type table<number, Sector>
+local sectorsLookup = {}
 
 local painting = false
 local paintValue
@@ -60,13 +74,25 @@ local camera = {
   y = mapHeight / 2,
   lookX = 1,
   lookY = 0,
+  leftLookX = 0,
+  leftLookY = 0,
+  rightLookX = 0,
+  rightLookY = 0,
+  fov = math.rad(100)
 }
+
+local function setCameraLook(x, y)
+  camera.lookX, camera.lookY = x, y
+  camera.leftLookX, camera.leftLookY = rotatePoint(camera.lookX, camera.lookY, -camera.fov / 2 + math.pi / 2)
+  camera.rightLookX, camera.rightLookY = rotatePoint(camera.lookX, camera.lookY, camera.fov / 2 - math.pi / 2)
+end
+
+setCameraLook(1, 0)
 
 do
   local d = tileSize * 3
-  local fov = math.pi
   local verts = { { 0, 0, 1, 1, 1, 1 } }
-  for a = -fov / 2, fov / 2, math.pi / 8 do
+  for a = -camera.fov / 2, camera.fov / 2, camera.fov / 4 do
     table.insert(verts, {
       math.cos(a) * d,
       math.sin(a) * d,
@@ -119,13 +145,22 @@ local function getTile(x, y)
   return map[y * mapWidth + x]
 end
 
+---@class SectorLink
+---@field x1 number
+---@field y1 number
+---@field x2 number
+---@field y2 number
+---@field sector Sector
+
 ---@class Sector
 ---@field x1 number
 ---@field y1 number
 ---@field x2 number
 ---@field y2 number
 ---@field color table
----@field links table<Direction, Sector[]>
+---@field links table<Direction, SectorLink[]>
+---@field initialContiguous boolean?
+---@field _cameFrom Sector?
 
 local function newSector(x1, y1, x2, y2)
   ---@type Sector
@@ -145,12 +180,10 @@ end
 
 local function generateSectors()
   sectors = {}
-
-  ---@type table<number, Sector>
-  local sectorifiedPositions = {}
+  sectorsLookup = {}
 
   local function isEmpty(x, y)
-    return not getTile(x, y) and not sectorifiedPositions[id(x, y)]
+    return not getTile(x, y) and not sectorsLookup[id(x, y)]
   end
 
   local function isRowEmpty(x1, x2, y)
@@ -164,23 +197,23 @@ local function generateSectors()
 
   for y = 0, mapHeight - 1 do
     for x = 0, mapWidth - 1 do
-      if sectorifiedPositions[id(x, y)] then
+      if sectorsLookup[id(x, y)] then
         goto continue
       elseif not getTile(x, y) then
         local new = newSector(x, y, x, y)
-        sectorifiedPositions[id(x, y)] = new
+        sectorsLookup[id(x, y)] = new
 
         -- expand along the x axis
         while inMap(new.x2 + 1, new.y2) and isEmpty(new.x2 + 1, new.y2) do
           new.x2 = new.x2 + 1
-          sectorifiedPositions[id(new.x2, new.y2)] = new
+          sectorsLookup[id(new.x2, new.y2)] = new
         end
 
         -- expand along the y axis
         while inMap(new.x2, new.y2 + 1) and isRowEmpty(x, new.x2, new.y2 + 1) do
           new.y2 = new.y2 + 1
           for x3 = x, new.x2 do
-            sectorifiedPositions[id(x3, new.y2)] = new
+            sectorsLookup[id(x3, new.y2)] = new
           end
         end
 
@@ -195,13 +228,27 @@ local function generateSectors()
     if s.y1 > 0 then
       local lastLeft
       for x = s.x1, s.x2 do
-        if inMap(x, s.y1 - 1) and sectorifiedPositions[id(x, s.y1 - 1)] then
-          local other = sectorifiedPositions[id(x, s.y1 - 1)]
+        if inMap(x, s.y1 - 1) and sectorsLookup[id(x, s.y1 - 1)] then
+          local other = sectorsLookup[id(x, s.y1 - 1)]
           if lastLeft == other then
             goto continue
           end
-          table.insert(s.links[directionsNamed.up], other)
-          table.insert(other.links[directionsNamed.down], s)
+          local x1, x2 = math.max(s.x1, other.x1), math.min(s.x2, other.x2) + 1
+          local y = s.y1
+          table.insert(s.links[directionsNamed.up], {
+            x1 = x1,
+            x2 = x2,
+            y1 = y,
+            y2 = y,
+            sector = other
+          })
+          table.insert(other.links[directionsNamed.down], {
+            x1 = x1,
+            x2 = x2,
+            y1 = y,
+            y2 = y,
+            sector = s
+          })
           lastLeft = other
         end
         ::continue::
@@ -212,16 +259,80 @@ local function generateSectors()
       -- look for sectors directly to the left of `s`, and link them together.
       local lastUp
       for y = s.y1, s.y2 do
-        if inMap(s.x1 - 1, y) and sectorifiedPositions[id(s.x1 - 1, y)] then
-          local other = sectorifiedPositions[id(s.x1 - 1, y)]
+        if inMap(s.x1 - 1, y) and sectorsLookup[id(s.x1 - 1, y)] then
+          local other = sectorsLookup[id(s.x1 - 1, y)]
           if lastUp == other then
             goto continue
           end
-          table.insert(s.links[directionsNamed.left], other)
-          table.insert(other.links[directionsNamed.right], s)
+          local y1, y2 = math.max(s.y1, other.y1), math.min(s.y2, other.y2) + 1
+          local x = s.x1
+          table.insert(s.links[directionsNamed.left], {
+            x1 = x,
+            x2 = x,
+            y1 = y1,
+            y2 = y2,
+            sector = other
+          })
+          table.insert(other.links[directionsNamed.right], {
+            x1 = x,
+            x2 = x,
+            y1 = y1,
+            y2 = y2,
+            sector = s
+          })
           lastUp = other
         end
         ::continue::
+      end
+    end
+  end
+end
+
+local function pointOutsideLeftFrustum(x, y)
+  return dot(x, y, camera.leftLookX, camera.leftLookY) < dot(camera.x, camera.y, camera.leftLookX, camera.leftLookY)
+end
+
+local function pointOutsideRightFrustum(x, y)
+  return dot(x, y, camera.rightLookX, camera.rightLookY) < dot(camera.x, camera.y, camera.rightLookX, camera.rightLookY)
+end
+
+local function calculateVisibility()
+  visibleSectors = {}
+
+  if not inMap(math.floor(camera.x), math.floor(camera.y)) then
+    return
+  end
+
+  ---@type table<Sector, true>
+  local visitedSectors = {}
+
+  ---@type Sector[]
+  local queue = {}
+
+  local initialSector = sectorsLookup[id(math.floor(camera.x), math.floor(camera.y))]
+  if not initialSector then
+    return
+  end
+  table.insert(queue, initialSector)
+  visitedSectors[initialSector] = true
+
+  while #queue > 0 do
+    ---@type Sector
+    local s = table.remove(queue, 1)
+    visibleSectors[s] = true
+
+    for dir, links in pairs(s.links) do
+      for _, link in ipairs(links) do
+        if not visitedSectors[link.sector] then
+          if not (
+                (pointOutsideLeftFrustum(link.x1, link.y1) and pointOutsideLeftFrustum(link.x2, link.y2)) or
+                (pointOutsideRightFrustum(link.x1, link.y1) and pointOutsideRightFrustum(link.x2, link.y2))) and
+              dot(camera.lookX, camera.lookY, dir.x, dir.y) > -0.8 then
+            table.insert(queue, link.sector)
+            link.sector._cameFrom = s
+            visitedSectors[link.sector] = true
+          end
+        end
       end
     end
   end
@@ -235,6 +346,7 @@ local function paint(x, y, value)
   map[y * mapHeight + x] = value
   if value ~= prev then
     generateSectors()
+    calculateVisibility()
   end
 end
 
@@ -259,6 +371,7 @@ function love.mousemoved(x, y, dx, dy)
   if draggingCamera then
     camera.x = camera.x + dx / tileSize
     camera.y = camera.y + dy / tileSize
+    calculateVisibility()
   elseif painting then
     paint(math.floor(x / tileSize), math.floor(y / tileSize), paintValue)
   end
@@ -275,12 +388,16 @@ end
 function love.update(dt)
   if love.mouse.isDown(2) then
     local mx, my = love.mouse.getPosition()
-    camera.lookX, camera.lookY = normalize(mx - camera.x * tileSize, my - camera.y * tileSize)
+    local cx, cy = camera.x * tileSize, camera.y * tileSize
+    if mx ~= cx or my ~= cy then
+      setCameraLook(normalize(mx - cx, my - cy))
+      calculateVisibility()
+    end
   end
 end
 
 function love.draw()
-  lg.setColor(1, 1, 1, 0.5)
+  lg.setColor(1, 1, 1, 0.4)
   lg.setLineWidth(1)
   lg.setLineStyle("rough")
 
@@ -306,22 +423,33 @@ function love.draw()
 
   for _, s in ipairs(sectors) do
     local margin = 2
-    lg.setColor(s.color)
+    lg.setColor(s.color[1], s.color[2], s.color[3], s.color[4] * (visibleSectors[s] and 1 or 0.5))
     lg.rectangle("fill", s.x1 * tileSize + margin, s.y1 * tileSize + margin, (s.x2 - s.x1 + 1) * tileSize - margin * 2,
       (s.y2 - s.y1 + 1) * tileSize - margin * 2)
   end
 
-  lg.setColor(1, 0, 0)
   lg.setLineWidth(3)
   lg.setLineStyle("rough")
   for _, s in ipairs(sectors) do
     local l = 6
-    for _, other in ipairs(s.links[directionsNamed.left]) do
-      local y = (math.max(s.y1, other.y1) + math.min(s.y2, other.y2) + 1) / 2 * tileSize
+    for _, link in ipairs(s.links[directionsNamed.left]) do
+      local y = (link.y1 + link.y2) / 2 * tileSize
+      local isVisible = visibleSectors[s] and visibleSectors[link.sector] and
+          (s._cameFrom == link.sector or link.sector._cameFrom == s)
+      if isVisible then
+        lg.setColor(0, 1, 0)
+      else
+        lg.setColor(1, 0, 0)
+      end
       lg.line(s.x1 * tileSize - l, y, s.x1 * tileSize + l, y)
     end
-    for _, other in ipairs(s.links[directionsNamed.up]) do
-      local x = (math.max(s.x1, other.x1) + math.min(s.x2, other.x2) + 1) / 2 * tileSize
+    for _, link in ipairs(s.links[directionsNamed.up]) do
+      local x = (link.x1 + link.x2) / 2 * tileSize
+      if visibleSectors[s] and visibleSectors[link.sector] and (s._cameFrom == link.sector or link.sector._cameFrom == s) then
+        lg.setColor(0, 1, 0)
+      else
+        lg.setColor(1, 0, 0)
+      end
       lg.line(x, s.y1 * tileSize - l, x, s.y1 * tileSize + l)
     end
   end
@@ -329,6 +457,12 @@ function love.draw()
   lg.push()
   lg.translate(camera.x * tileSize, camera.y * tileSize)
   lg.rotate(math.atan2(camera.lookY, camera.lookX))
+  lg.setColor(1, 1, 1, 0.1)
+  lg.arc("fill", 0, 0, 800, -camera.fov / 2, camera.fov / 2)
+  lg.setColor(1, 1, 1, 0.5)
+  lg.setLineWidth(4)
+  lg.line(0, 0, tileSize * 2, 0)
+  lg.line(tileSize * 2 - 10, -10, tileSize * 2, 0, tileSize * 2 - 10, 10)
   lg.setColor(1, 1, 1)
   lg.circle("fill", 0, 0, tileSize / 4)
   lg.setColor(1, 1, 1, 0.8)
