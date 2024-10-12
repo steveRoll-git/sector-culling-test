@@ -12,6 +12,15 @@ end
 local love = love
 local lg = love.graphics
 
+local function dist(x1, y1, x2, y2)
+  return math.sqrt((x1 - x2) ^ 2 + (y1 - y2) ^ 2)
+end
+
+local function normalize(x, y)
+  local len = dist(0, 0, x, y)
+  return x / len, y / len
+end
+
 local mapWidth = 20
 local mapHeight = 20
 local tileSize = 24
@@ -23,6 +32,8 @@ local sectors = {}
 
 local painting = false
 local paintValue
+
+local draggingCamera = false
 
 ---@class Direction
 ---@field x number
@@ -43,6 +54,30 @@ local directions = {
   directionsNamed.up,
   directionsNamed.down,
 }
+
+local camera = {
+  x = mapWidth / 2,
+  y = mapHeight / 2,
+  lookX = 1,
+  lookY = 0,
+}
+
+do
+  local d = tileSize * 3
+  local fov = math.pi
+  local verts = { { 0, 0, 1, 1, 1, 1 } }
+  for a = -fov / 2, fov / 2, math.pi / 8 do
+    table.insert(verts, {
+      math.cos(a) * d,
+      math.sin(a) * d,
+      1, 1, 1, 0
+    })
+  end
+  camera.mesh = lg.newMesh({
+    { "VertexPosition", "float", 2 },
+    { "VertexColor",    "float", 4 },
+  }, verts, "fan")
+end
 
 local function id(x, y)
   return y * mapWidth + x
@@ -99,7 +134,7 @@ local function newSector(x1, y1, x2, y2)
     y1 = y1,
     x2 = x2,
     y2 = y2,
-    color = { HSVToRGB(#sectors / 12, 0.7, 1, 0.75) },
+    color = { HSVToRGB(#sectors / 12, 0.7, 1, 0.6) },
     links = {}
   }
   for _, d in ipairs(directions) do
@@ -205,26 +240,42 @@ end
 
 function love.mousepressed(x, y, btn)
   if btn == 1 then
-    local mx = math.floor(love.mouse.getX() / tileSize)
-    local my = math.floor(love.mouse.getY() / tileSize)
-    if inMap(mx, my) then
-      local prev = map[my * mapWidth + mx]
-      paintValue = not prev
-      paint(mx, my, paintValue)
-      painting = true
+    if dist(x, y, camera.x * tileSize, camera.y * tileSize) <= 10 then
+      draggingCamera = true
+    else
+      local mx = math.floor(love.mouse.getX() / tileSize)
+      local my = math.floor(love.mouse.getY() / tileSize)
+      if inMap(mx, my) then
+        local prev = map[my * mapWidth + mx]
+        paintValue = not prev
+        paint(mx, my, paintValue)
+        painting = true
+      end
     end
   end
 end
 
 function love.mousemoved(x, y, dx, dy)
-  if painting then
+  if draggingCamera then
+    camera.x = camera.x + dx / tileSize
+    camera.y = camera.y + dy / tileSize
+  elseif painting then
     paint(math.floor(x / tileSize), math.floor(y / tileSize), paintValue)
   end
 end
 
 function love.mousereleased(x, y, btn)
-  if painting and btn == 1 then
+  if draggingCamera and btn == 1 then
+    draggingCamera = false
+  elseif painting and btn == 1 then
     painting = false
+  end
+end
+
+function love.update(dt)
+  if love.mouse.isDown(2) then
+    local mx, my = love.mouse.getPosition()
+    camera.lookX, camera.lookY = normalize(mx - camera.x * tileSize, my - camera.y * tileSize)
   end
 end
 
@@ -274,4 +325,13 @@ function love.draw()
       lg.line(x, s.y1 * tileSize - l, x, s.y1 * tileSize + l)
     end
   end
+
+  lg.push()
+  lg.translate(camera.x * tileSize, camera.y * tileSize)
+  lg.rotate(math.atan2(camera.lookY, camera.lookX))
+  lg.setColor(1, 1, 1)
+  lg.circle("fill", 0, 0, tileSize / 4)
+  lg.setColor(1, 1, 1, 0.8)
+  lg.draw(camera.mesh)
+  lg.pop()
 end
