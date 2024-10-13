@@ -105,6 +105,13 @@ do
   }, verts, "fan")
 end
 
+local moveKeys = {
+  w = { y = -1 },
+  s = { y = 1 },
+  a = { x = -1 },
+  d = { x = 1 },
+}
+
 local function id(x, y)
   return y * mapWidth + x
 end
@@ -405,6 +412,13 @@ function love.update(dt)
       calculateVisibility()
     end
   end
+  for key, dir in pairs(moveKeys) do
+    if love.keyboard.isDown(key) then
+      camera.x = camera.x + (dir.x or 0) * 6 * dt
+      camera.y = camera.y + (dir.y or 0) * 6 * dt
+    end
+  end
+  calculateVisibility()
 end
 
 function love.draw()
