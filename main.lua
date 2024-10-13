@@ -443,25 +443,19 @@ function love.draw()
   lg.setLineStyle("rough")
   for _, s in ipairs(sectors) do
     local l = 6
-    for _, link in ipairs(s.links[directionsNamed.left]) do
-      local y = (link.y1 + link.y2) / 2 * tileSize
-      local isVisible = visibleSectors[s] and visibleSectors[link.sector] and
-          (s._cameFrom == link.sector or link.sector._cameFrom == s)
-      if isVisible then
-        lg.setColor(0, 1, 0)
-      else
-        lg.setColor(1, 0, 0)
+    for dir, links in pairs(s.links) do
+      for _, link in ipairs(links) do
+        local isVisible = visibleSectors[s] and visibleSectors[link.sector] and
+            (s._cameFrom == link.sector or link.sector._cameFrom == s)
+        if isVisible then
+          lg.push()
+          lg.translate((link.x1 + link.x2) / 2 * tileSize, (link.y1 + link.y2) / 2 * tileSize)
+          lg.rotate(math.atan2(dir.y, dir.x))
+          lg.setColor(1, 1, 1)
+          lg.line(-l, 0, l, 0)
+          lg.pop()
+        end
       end
-      lg.line(s.x1 * tileSize - l, y, s.x1 * tileSize + l, y)
-    end
-    for _, link in ipairs(s.links[directionsNamed.up]) do
-      local x = (link.x1 + link.x2) / 2 * tileSize
-      if visibleSectors[s] and visibleSectors[link.sector] and (s._cameFrom == link.sector or link.sector._cameFrom == s) then
-        lg.setColor(0, 1, 0)
-      else
-        lg.setColor(1, 0, 0)
-      end
-      lg.line(x, s.y1 * tileSize - l, x, s.y1 * tileSize + l)
     end
   end
 
