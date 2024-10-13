@@ -159,7 +159,8 @@ end
 ---@field y2 number
 ---@field color table
 ---@field links table<Direction, SectorLink[]>
----@field initialContiguous boolean?
+---@field visitDirX? number
+---@field visitDirY? number
 ---@field _cameFrom Sector?
 
 local function newSector(x1, y1, x2, y2)
@@ -313,6 +314,8 @@ local function calculateVisibility()
   if not initialSector then
     return
   end
+  initialSector.visitDirX = nil
+  initialSector.visitDirY = nil
   table.insert(queue, initialSector)
   visitedSectors[initialSector] = true
 
@@ -322,18 +325,24 @@ local function calculateVisibility()
     visibleSectors[s] = true
 
     for dir, links in pairs(s.links) do
+      if s.visitDirX and ((dir.x ~= 0 and s.visitDirX == -dir.x) or (dir.y ~= 0 and s.visitDirY == -dir.y)) then
+        goto continue
+      end
       for _, link in ipairs(links) do
-        if not visitedSectors[link.sector] then
+        local next = link.sector
+        if not visitedSectors[next] then
           if not (
                 (pointOutsideLeftFrustum(link.x1, link.y1) and pointOutsideLeftFrustum(link.x2, link.y2)) or
-                (pointOutsideRightFrustum(link.x1, link.y1) and pointOutsideRightFrustum(link.x2, link.y2))) and
-              dot(camera.lookX, camera.lookY, dir.x, dir.y) > -0.8 then
-            table.insert(queue, link.sector)
-            link.sector._cameFrom = s
-            visitedSectors[link.sector] = true
+                (pointOutsideRightFrustum(link.x1, link.y1) and pointOutsideRightFrustum(link.x2, link.y2))) then
+            table.insert(queue, next)
+            next._cameFrom = s
+            next.visitDirX = dir.x ~= 0 and dir.x or (s.visitDirX or 0)
+            next.visitDirY = dir.y ~= 0 and dir.y or (s.visitDirY or 0)
+            visitedSectors[next] = true
           end
         end
       end
+      ::continue::
     end
   end
 end
@@ -423,7 +432,7 @@ function love.draw()
 
   for _, s in ipairs(sectors) do
     local margin = 2
-    lg.setColor(s.color[1], s.color[2], s.color[3], s.color[4] * (visibleSectors[s] and 1 or 0.5))
+    lg.setColor(s.color[1], s.color[2], s.color[3], s.color[4] * (visibleSectors[s] and 1 or 0.4))
     lg.rectangle("fill", s.x1 * tileSize + margin, s.y1 * tileSize + margin, (s.x2 - s.x1 + 1) * tileSize - margin * 2,
       (s.y2 - s.y1 + 1) * tileSize - margin * 2)
   end
