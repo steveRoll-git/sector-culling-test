@@ -331,7 +331,9 @@ local function calculateVisibility()
       for _, link in ipairs(links) do
         local next = link.sector
         if not visitedSectors[next] then
-          if not (
+          if
+              dot(link.x1, link.y1, dir.x, dir.y) > dot(camera.x, camera.y, dir.x, dir.y) and
+              not (
                 (pointOutsideLeftFrustum(link.x1, link.y1) and pointOutsideLeftFrustum(link.x2, link.y2)) or
                 (pointOutsideRightFrustum(link.x1, link.y1) and pointOutsideRightFrustum(link.x2, link.y2))) then
             table.insert(queue, next)
