@@ -69,6 +69,13 @@ local directions = {
   directionsNamed.down,
 }
 
+local oppositeDirections = {
+  [directionsNamed.left] = directionsNamed.right,
+  [directionsNamed.right] = directionsNamed.left,
+  [directionsNamed.up] = directionsNamed.down,
+  [directionsNamed.down] = directionsNamed.up,
+}
+
 local camera = {
   x = mapWidth / 2,
   y = mapHeight / 2,
@@ -186,6 +193,30 @@ local function newSector(x1, y1, x2, y2)
   return new
 end
 
+---@param s1 Sector
+---@param s2 Sector
+---@param direction Direction
+---@param x1 number
+---@param y1 number
+---@param x2 number
+---@param y2 number
+local function linkSectors(s1, s2, direction, x1, y1, x2, y2)
+  table.insert(s1.links[direction], {
+    x1 = x1,
+    x2 = x2,
+    y1 = y1,
+    y2 = y2,
+    sector = s2
+  })
+  table.insert(s2.links[oppositeDirections[direction]], {
+    x1 = x1,
+    x2 = x2,
+    y1 = y1,
+    y2 = y2,
+    sector = s1
+  })
+end
+
 local function generateSectors()
   sectors = {}
   sectorsLookup = {}
@@ -243,20 +274,7 @@ local function generateSectors()
           end
           local x1, x2 = math.max(s.x1, other.x1), math.min(s.x2, other.x2) + 1
           local y = s.y1
-          table.insert(s.links[directionsNamed.up], {
-            x1 = x1,
-            x2 = x2,
-            y1 = y,
-            y2 = y,
-            sector = other
-          })
-          table.insert(other.links[directionsNamed.down], {
-            x1 = x1,
-            x2 = x2,
-            y1 = y,
-            y2 = y,
-            sector = s
-          })
+          linkSectors(s, other, directionsNamed.up, x1, y, x2, y)
           lastLeft = other
         end
         ::continue::
@@ -274,20 +292,7 @@ local function generateSectors()
           end
           local y1, y2 = math.max(s.y1, other.y1), math.min(s.y2, other.y2) + 1
           local x = s.x1
-          table.insert(s.links[directionsNamed.left], {
-            x1 = x,
-            x2 = x,
-            y1 = y1,
-            y2 = y2,
-            sector = other
-          })
-          table.insert(other.links[directionsNamed.right], {
-            x1 = x,
-            x2 = x,
-            y1 = y1,
-            y2 = y2,
-            sector = s
-          })
+          linkSectors(s, other, directionsNamed.left, x, y1, x, y2)
           lastUp = other
         end
         ::continue::
