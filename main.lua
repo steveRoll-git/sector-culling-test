@@ -189,9 +189,6 @@ local function newSector(x1, y1, x2, y2)
     links = {},
     planes = {},
   }
-  for _, d in ipairs(directions) do
-    new.links[d] = {}
-  end
   return new
 end
 
@@ -203,6 +200,9 @@ end
 ---@param x2 number
 ---@param y2 number
 local function linkSectors(s1, s2, direction, x1, y1, x2, y2)
+  if not s1.links[direction] then
+    s1.links[direction] = {}
+  end
   table.insert(s1.links[direction], {
     x1 = x1,
     x2 = x2,
@@ -210,6 +210,9 @@ local function linkSectors(s1, s2, direction, x1, y1, x2, y2)
     y2 = y2,
     sector = s2
   })
+  if not s2.links[oppositeDirections[direction]] then
+    s2.links[oppositeDirections[direction]] = {}
+  end
   table.insert(s2.links[oppositeDirections[direction]], {
     x1 = x1,
     x2 = x2,
