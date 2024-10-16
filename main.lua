@@ -437,21 +437,25 @@ function love.mousereleased(x, y, btn)
 end
 
 function love.update(dt)
+  local moved = false
   if love.mouse.isDown(2) then
     local mx, my = love.mouse.getPosition()
     local cx, cy = camera.x * tileSize, camera.y * tileSize
     if mx ~= cx or my ~= cy then
       setCameraLook(normalize(mx - cx, my - cy))
-      calculateVisibility()
+      moved = true
     end
   end
   for key, dir in pairs(moveKeys) do
     if love.keyboard.isDown(key) then
       camera.x = camera.x + (dir.x or 0) * 6 * dt
       camera.y = camera.y + (dir.y or 0) * 6 * dt
+      moved = true
     end
   end
-  calculateVisibility()
+  if moved then
+    calculateVisibility()
+  end
 end
 
 function love.draw()
