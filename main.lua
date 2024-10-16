@@ -173,6 +173,7 @@ end
 ---@field y2 number
 ---@field color table
 ---@field links table<Direction, SectorLink[]>
+---@field planes table<Direction, {x: number, y: number}>
 ---@field visitDirX? number
 ---@field visitDirY? number
 ---@field _cameFrom Sector?
@@ -185,7 +186,8 @@ local function newSector(x1, y1, x2, y2)
     x2 = x2,
     y2 = y2,
     color = { HSVToRGB(#sectors / 12, 0.7, 1, 0.6) },
-    links = {}
+    links = {},
+    planes = {},
   }
   for _, d in ipairs(directions) do
     new.links[d] = {}
@@ -256,6 +258,25 @@ local function generateSectors()
           end
         end
 
+        new.planes = {
+          [directionsNamed.left] = {
+            x = new.x1,
+            y = new.y1,
+          },
+          [directionsNamed.right] = {
+            x = new.x2 + 1,
+            y = new.y1,
+          },
+          [directionsNamed.up] = {
+            x = new.x1,
+            y = new.y1,
+          },
+          [directionsNamed.down] = {
+            x = new.x1,
+            y = new.y2 + 1,
+          },
+        }
+
         table.insert(sectors, new)
       end
       ::continue::
@@ -316,9 +337,8 @@ local function calculateVisibility()
     return
   end
 
-  ---@type table<Sector, true>
-  local visitedSectors = {}
-
+  -- Sectors added to this queue will be marked visible,
+  -- and their neighbors will be checked.
   ---@type Sector[]
   local queue = {}
 
@@ -328,32 +348,40 @@ local function calculateVisibility()
   end
   initialSector.visitDirX = nil
   initialSector.visitDirY = nil
+  visibleSectors[initialSector] = true
   table.insert(queue, initialSector)
-  visitedSectors[initialSector] = true
 
   while #queue > 0 do
     ---@type Sector
     local s = table.remove(queue, 1)
-    visibleSectors[s] = true
 
     for dir, links in pairs(s.links) do
+      -- If `s` has been visited from a certain direction, we ignore links opposite to that direction.
       if s.visitDirX and ((dir.x ~= 0 and s.visitDirX == -dir.x) or (dir.y ~= 0 and s.visitDirY == -dir.y)) then
         goto continue
       end
+
+      local plane = s.planes[dir]
+      -- If the camera is behind this direction's plane, we ignore all links in this direction.
+      if dot(plane.x, plane.y, dir.x, dir.y) < dot(camera.x, camera.y, dir.x, dir.y) then
+        goto continue
+      end
+
       for _, link in ipairs(links) do
         local next = link.sector
-        if not visitedSectors[next] then
-          if
-              dot(link.x1, link.y1, dir.x, dir.y) > dot(camera.x, camera.y, dir.x, dir.y) and
-              not (
-                (pointOutsideLeftFrustum(link.x1, link.y1) and pointOutsideLeftFrustum(link.x2, link.y2)) or
-                (pointOutsideRightFrustum(link.x1, link.y1) and pointOutsideRightFrustum(link.x2, link.y2))) then
-            table.insert(queue, next)
-            next._cameFrom = s
-            next.visitDirX = dir.x ~= 0 and dir.x or (s.visitDirX or 0)
-            next.visitDirY = dir.y ~= 0 and dir.y or (s.visitDirY or 0)
-            visitedSectors[next] = true
-          end
+        -- If we haven't already marked this sector visible, and the link is inside the camera's frustum,
+        -- mark it visible and add it to the queue.
+        if
+            not visibleSectors[next] and
+            not (
+              (pointOutsideLeftFrustum(link.x1, link.y1) and pointOutsideLeftFrustum(link.x2, link.y2)) or
+              (pointOutsideRightFrustum(link.x1, link.y1) and pointOutsideRightFrustum(link.x2, link.y2))) then
+          visibleSectors[next] = true
+          table.insert(queue, next)
+          next._cameFrom = s
+          -- Store which x and y direction we visited this sector from.
+          next.visitDirX = dir.x ~= 0 and dir.x or (s.visitDirX or 0)
+          next.visitDirY = dir.y ~= 0 and dir.y or (s.visitDirY or 0)
         end
       end
       ::continue::
